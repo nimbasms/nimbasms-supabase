@@ -28,7 +28,7 @@ Auth, Database triggers, and your front-end.
 
 | Requirement       | Where                                                       |
 | ----------------- | ----------------------------------------------------------- |
-| Nimba SMS account | [app.nimbasms.com](https://app.nimbasms.com)                |
+| Nimba SMS account | [www.nimbasms.com](https://www.nimbasms.com)                |
 | `SERVICE_ID` + `SECRET_TOKEN` | Nimba dashboard → Settings → API              |
 | Approved Sender ID | Nimba dashboard → Sender Names                             |
 | Supabase project  | [supabase.com](https://supabase.com)                        |
