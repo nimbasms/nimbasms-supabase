@@ -34,7 +34,6 @@ Database triggers, and your front-end.
 | Approved Sender ID | Nimba dashboard → Sender Names |
 | Supabase project | [supabase.com](https://supabase.com) |
 | Supabase CLI ≥ 1.200 | `npm install -g supabase` |
-
 ---
 
 ## Quickstart
