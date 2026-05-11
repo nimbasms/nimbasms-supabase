@@ -35,14 +35,32 @@ enable_confirmations = false
 [functions.send-sms]
 verify_jwt = true
 
-[functions.send-campaign]
-verify_jwt = true
-
 [functions.check-balance]
 verify_jwt = true
 
+[functions.get-sendernames]
+verify_jwt = true
+
+[functions.list-messages]
+verify_jwt = true
+
+[functions.list-contacts]
+verify_jwt = true
+
+[functions.create-contact]
+verify_jwt = true
+
 [functions.verify-otp]
-# Public — anyone with the OTP code can verify
+# Public — anyone with the OTP code can verify (custom OTP flow)
+verify_jwt = false
+
+[functions.send-otp]
+# Public — unauthenticated sign-up flows trigger OTP delivery. Nimba enforces
+# per-account rate limits server-side.
+verify_jwt = false
+
+[functions.confirm-otp]
+# Public — pairs with send-otp; submits the user-typed code to Nimba.
 verify_jwt = false
 
 [functions.sms-webhook]

@@ -6,7 +6,9 @@ Get your first SMS out through Nimba SMS in under 5 minutes.
 
 - A Supabase project (cloud or self-hosted) and the [Supabase CLI](https://supabase.com/docs/guides/cli) v1.200+
 - A Nimba SMS account ([app.nimbasms.com](https://app.nimbasms.com)) with
-  - a `SERVICE_ID` and `SECRET_TOKEN` (Settings → API)
+  - an `ACCOUNT_SID` and `AUTH_TOKEN` (Settings → API — they are labelled
+    **SERVICE_ID** and **SECRET_TOKEN** in the dashboard but the SDK calls
+    them ACCOUNT_SID/AUTH_TOKEN)
   - at least one approved Sender ID
 - Node 18+ or Deno 1.40+ on your dev machine
 
@@ -23,8 +25,8 @@ supabase link --project-ref <your-project-ref>
 
 ```bash
 supabase secrets set \
-  NIMBA_SERVICE_ID=your_service_id \
-  NIMBA_SECRET_TOKEN=your_secret_token \
+  NIMBA_ACCOUNT_SID=your_account_sid \
+  NIMBA_AUTH_TOKEN=your_auth_token \
   NIMBA_DEFAULT_SENDER=YourBrand \
   NIMBA_WEBHOOK_SECRET="$(openssl rand -hex 32)"
 ```
@@ -42,7 +44,10 @@ This creates `public.sms_logs` and the RLS policies.
 ## 5. Deploy the functions
 
 ```bash
-supabase functions deploy send-sms send-campaign sms-webhook check-balance verify-otp
+supabase functions deploy \
+  send-sms sms-webhook check-balance \
+  get-sendernames list-messages list-contacts create-contact \
+  send-otp confirm-otp verify-otp
 ```
 
 ## 6. Send a test message
@@ -51,7 +56,11 @@ supabase functions deploy send-sms send-campaign sms-webhook check-balance verif
 curl -X POST "https://<project-ref>.supabase.co/functions/v1/send-sms" \
   -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
   -H "Content-Type: application/json" \
-  -d '{ "to": "+224620000000", "message": "Hello from Nimba SMS!" }'
+  -d '{
+    "to": ["224623273737"],
+    "sender_name": "MyApp",
+    "message": "Hello from Nimba SMS!"
+  }'
 ```
 
 Expected response:
@@ -59,8 +68,10 @@ Expected response:
 ```json
 {
   "message_id": "8f12…",
-  "recipients": ["+224620000000"],
-  "status": "sent"
+  "batch_id":   "9e3b…",
+  "recipients": ["224623273737"],
+  "status":     "sent",
+  "wrapped_single": false
 }
 ```
 
@@ -81,8 +92,8 @@ URL:     https://<project-ref>.supabase.co/functions/v1/sms-webhook
 Header:  x-nimba-signature: <NIMBA_WEBHOOK_SECRET>
 ```
 
-Once Nimba posts back, the row's status flips to `delivered` (or `failed`)
-and `delivered_at` is filled.
+Once Nimba posts back, each recipient row of the batch flips to `delivered`
+(or `failed`) and `delivered_at` is filled.
 
 ## Next steps
 

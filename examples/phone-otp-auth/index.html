@@ -41,7 +41,7 @@
 
     <section id="step-phone">
       <label for="phone">Phone number</label>
-      <input id="phone" type="tel" placeholder="+224 620 00 00 00" autocomplete="tel" />
+      <input id="phone" type="tel" placeholder="224 620 00 00 00" autocomplete="tel" />
       <button id="btn-send">Send code</button>
       <div id="msg-phone" class="msg"></div>
     </section>
@@ -78,15 +78,14 @@
 
       // ── Helpers ──────────────────────────────────────────────────────────
       function formatGuineanNumber(raw) {
-        const trimmed = String(raw).trim();
-        if (!trimmed) return "";
-        const hasPlus = trimmed.startsWith("+");
-        const digits = trimmed.replace(/[^\d]/g, "");
+        if (!raw) return "";
+        const digits = String(raw).replace(/[^\d]/g, "");
         if (!digits) return "";
-        if (hasPlus) return `+${digits}`;
-        if (digits.startsWith("224") && digits.length >= 11) return `+${digits}`;
-        if (digits.length === 8 || digits.length === 9) return `+224${digits}`;
-        return `+${digits}`;
+        // Local format (no country code) → assume Guinea (224).
+        if ((digits.length === 8 || digits.length === 9) && !digits.startsWith("224")) {
+          return `224${digits}`;
+        }
+        return digits;
       }
 
       async function sha256Hex(input) {
@@ -132,7 +131,7 @@
           if (insertError) throw insertError;
 
           const { error: sendError } = await supabase.functions.invoke("send-sms", {
-            body: { to: phone, message: `Your verification code: ${code}` },
+            body: { to: [phone], message: `Your verification code: ${code}` },
           });
           if (sendError) throw sendError;
 

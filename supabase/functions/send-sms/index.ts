@@ -1,20 +1,29 @@
 // POST /functions/v1/send-sms
 //
-// Sends one or many SMS messages through Nimba SMS and records each delivery
-// attempt in `public.sms_logs`. Requires a valid Supabase JWT unless invoked
-// with the service-role key.
+// Sends one Nimba SMS request and records every recipient in `public.sms_logs`.
+// The Nimba REST API has a single sending endpoint (`POST /v1/messages`) that
+// accepts `to` as an array of 1..50 numbers — there is no distinction between
+// "single" and "batch". This function mirrors that contract.
 //
 // Body:
 //   {
-//     "to": "+224620000000" | ["+224620000000", "+224620000001"],
-//     "message": "Hello",
-//     "sender_name": "MyBrand"  // optional, falls back to NIMBA_DEFAULT_SENDER
+//     "to": ["224623000000", "224621000000"],
+//     "sender_name": "MyBrand",
+//     "message": "Hello"
 //   }
+//
+// As a convenience, `to` may be a single string — it will be auto-wrapped
+// into a 1-element array (the response sets `wrapped_single: true` so callers
+// can detect the coercion).
+//
+// To send more than 50 recipients, split your list client-side and call this
+// function multiple times.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.46.1";
 import { corsHeaders, handlePreflight, jsonResponse } from "../_shared/cors.ts";
 import {
   formatGuineanNumber,
+  MAX_RECIPIENTS_PER_REQUEST,
   NimbaSMSClient,
   NimbaSMSError,
 } from "../_shared/nimba-client.ts";
@@ -40,23 +49,42 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // ── Validate payload ────────────────────────────────────────────────────
-  const recipientsRaw = body.to;
+  // ── Validate / coerce payload ───────────────────────────────────────────
   const message = (body.message ?? "").trim();
   const senderName = body.sender_name?.trim() || undefined;
 
-  if (!recipientsRaw) {
+  if (body.to === undefined || body.to === null) {
     return jsonResponse({ error: "`to` is required" }, { status: 400 });
   }
   if (!message) {
     return jsonResponse({ error: "`message` is required" }, { status: 400 });
   }
-  const recipients = (Array.isArray(recipientsRaw) ? recipientsRaw : [recipientsRaw])
+
+  const wrappedSingle = typeof body.to === "string";
+  const rawList = wrappedSingle ? [body.to as string] : (body.to as string[]);
+  if (!Array.isArray(rawList)) {
+    return jsonResponse(
+      { error: "`to` must be a string or an array of strings" },
+      { status: 400 },
+    );
+  }
+
+  const recipients = rawList
     .map((r) => formatGuineanNumber(String(r)))
     .filter(Boolean);
   if (recipients.length === 0) {
     return jsonResponse(
       { error: "No valid recipient phone numbers" },
+      { status: 400 },
+    );
+  }
+  if (recipients.length > MAX_RECIPIENTS_PER_REQUEST) {
+    return jsonResponse(
+      {
+        error:
+          `Nimba SMS accepts up to ${MAX_RECIPIENTS_PER_REQUEST} recipients per request; split your list and call this endpoint multiple times`,
+        code: "too_many_recipients",
+      },
       { status: 400 },
     );
   }
@@ -86,6 +114,9 @@ Deno.serve(async (req) => {
     );
   }
 
+  const batchId = crypto.randomUUID();
+  const senderForLog = senderName ?? Deno.env.get("NIMBA_DEFAULT_SENDER") ?? null;
+
   try {
     const result = await client.sendMessage({
       to: recipients,
@@ -95,21 +126,17 @@ Deno.serve(async (req) => {
     const messageId = (result as { messageid?: string }).messageid ?? null;
     const sentAt = new Date().toISOString();
 
-    // ── Log each recipient ───────────────────────────────────────────────
+    // One row per recipient, all sharing the same message_id + batch_id.
     const rows = recipients.map((recipient) => ({
       user_id: userId,
       recipient,
       message,
-      sender_name: senderName ?? Deno.env.get("NIMBA_DEFAULT_SENDER") ?? null,
-      // The Nimba API returns a single `messageid` for the batch; we store it
-      // on the first recipient and leave it null for the others. A future
-      // delivery report webhook will update by `messageid`+`contact`.
+      sender_name: senderForLog,
       message_id: messageId,
-      status: "sent",
+      batch_id: batchId,
+      status: "sent" as const,
       sent_at: sentAt,
     }));
-    // Only the first row keeps the message_id (it must be unique).
-    for (let i = 1; i < rows.length; i++) rows[i].message_id = null;
 
     const { error: insertError } = await supabase.from("sms_logs").insert(rows);
     if (insertError) {
@@ -118,26 +145,29 @@ Deno.serve(async (req) => {
 
     return jsonResponse({
       message_id: messageId,
+      batch_id: batchId,
       recipients,
       status: "sent",
+      wrapped_single: wrappedSingle,
       provider_response: result,
     });
   } catch (err) {
     const nimbaErr = err as NimbaSMSError;
     const status = nimbaErr.status && nimbaErr.status >= 400 ? nimbaErr.status : 502;
-    // Best-effort: record the failure too so users can see it in the dashboard.
+    // Best-effort: persist failures too so the dashboard reflects them.
     await supabase.from("sms_logs").insert(
       recipients.map((recipient) => ({
         user_id: userId,
         recipient,
         message,
-        sender_name: senderName ?? Deno.env.get("NIMBA_DEFAULT_SENDER") ?? null,
+        sender_name: senderForLog,
+        batch_id: batchId,
         status: "failed",
         error: nimbaErr.message,
       })),
     );
     return jsonResponse(
-      { error: nimbaErr.message, code: nimbaErr.code ?? "send_failed" },
+      { error: nimbaErr.message, code: nimbaErr.code ?? "send_failed", batch_id: batchId },
       { status, headers: corsHeaders },
     );
   }

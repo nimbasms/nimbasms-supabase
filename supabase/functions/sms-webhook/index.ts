@@ -3,8 +3,12 @@
 // Receives delivery reports from Nimba SMS and updates the matching row in
 // `public.sms_logs`. The Nimba payload looks like:
 //
-//   { "messageid": "...", "contact": "+224...", "status": "received"|"failed",
+//   { "messageid": "...", "contact": "224...", "status": "received"|"failed",
 //     "error": "...", "metadata": { ... } }
+//
+// Because one `messageid` may map to several `sms_logs` rows (one per
+// recipient in a batch send), we update the row matching BOTH `message_id`
+// AND `contact`.
 //
 // Nimba does not document a built-in signature header, so we authenticate
 // inbound requests with a shared secret you configure on both ends:
@@ -18,6 +22,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.46.1";
 import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
+import { formatGuineanNumber } from "../_shared/nimba-client.ts";
 import type { NimbaWebhookPayload, SmsLogStatus } from "../_shared/types.ts";
 
 Deno.serve(async (req) => {
@@ -52,14 +57,16 @@ Deno.serve(async (req) => {
   }
 
   const messageId = payload.messageid;
-  const contact = payload.contact;
+  const contactRaw = payload.contact;
   const providerStatus = payload.status;
-  if (!messageId || !contact || !providerStatus) {
+  if (!messageId || !contactRaw || !providerStatus) {
     return jsonResponse(
       { error: "Missing required fields (messageid, contact, status)" },
       { status: 400 },
     );
   }
+  // Normalize to the same wire format we store (bare digits, e.g. `224...`).
+  const contact = formatGuineanNumber(contactRaw);
 
   // ── Map Nimba's status vocabulary to ours ───────────────────────────────
   let mapped: SmsLogStatus;
@@ -92,19 +99,19 @@ Deno.serve(async (req) => {
   };
   if (mapped === "delivered") update.delivered_at = new Date().toISOString();
 
-  // Update by message_id when known; fall back to (recipient, latest pending)
-  // for chunked-batch sends where only the first row owns the message_id.
-  const { error } = await supabase
+  // Update the specific recipient row inside the batch.
+  const { error, count } = await supabase
     .from("sms_logs")
-    .update(update)
-    .eq("message_id", messageId);
+    .update(update, { count: "exact" })
+    .eq("message_id", messageId)
+    .eq("recipient", contact);
 
   if (error) {
     console.error("sms_logs update failed", error);
     return jsonResponse({ error: "Database update failed" }, { status: 500 });
   }
 
-  return jsonResponse({ ok: true });
+  return jsonResponse({ ok: true, updated: count ?? 0 });
 });
 
 // Constant-time string comparison to avoid timing attacks on the shared secret.

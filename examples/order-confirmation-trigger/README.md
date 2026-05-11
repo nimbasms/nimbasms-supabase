@@ -24,7 +24,7 @@ This pattern works for any "fire-and-forget" notification:
 ## Prerequisites
 
 - The Edge Functions deployed (`supabase functions deploy send-sms`).
-- Project secrets set (`NIMBA_SERVICE_ID`, `NIMBA_SECRET_TOKEN`, `NIMBA_DEFAULT_SENDER`).
+- Project secrets set (`NIMBA_ACCOUNT_SID`, `NIMBA_AUTH_TOKEN`, `NIMBA_DEFAULT_SENDER`).
 - A way to reach `send-sms` from Postgres. Two options:
   1. **`pg_net`** (used here) — built-in to Supabase, asynchronous, doesn't
      block the transaction. Available via `extensions.http_post`.
@@ -50,7 +50,7 @@ service_role_key := 'YOUR_SERVICE_ROLE_KEY';
 
 ```sql
 insert into public.orders (customer_phone, total_xof)
-values ('+224620000000', 12500);
+values ('224620000000', 12500);
 ```
 
 Within a couple of seconds you should:

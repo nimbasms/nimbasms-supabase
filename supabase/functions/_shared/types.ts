@@ -2,15 +2,15 @@
 // Mirrors the upstream Nimba SMS REST API (https://api.nimbasms.com/v1).
 
 export interface NimbaClientOptions {
-  serviceId: string;
-  secretToken: string;
+  accountSid: string;
+  authToken: string;
   baseUrl?: string;
   defaultSender?: string;
   timeoutMs?: number;
 }
 
 export interface SendMessageInput {
-  to: string | string[];
+  to: string[];
   message: string;
   senderName?: string;
 }
@@ -19,9 +19,7 @@ export interface NimbaSendMessageResponse {
   // The API returns the created message identifier under `messageid`
   // (single word, lowercase) — see the upstream webhook contract.
   messageid?: string;
-  // Some responses include a top-level `status` field.
   status?: string;
-  // Free-form fields the API may include.
   [key: string]: unknown;
 }
 

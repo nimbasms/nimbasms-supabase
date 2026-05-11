@@ -1,8 +1,11 @@
-// GET /functions/v1/check-balance
+// GET /functions/v1/get-sendernames
 //
-// Returns the SMS credit balance of the configured Nimba SMS account.
-// 1:1 mapping with `GET /v1/accounts`. Use `get-sendernames` to list approved
-// Sender IDs.
+// Lists the Sender IDs registered on the Nimba SMS account, along with their
+// approval status. Wraps `GET /v1/sendernames`.
+//
+// Query params (all optional):
+//   - limit  (default 100, max 1000)
+//   - offset (default 0)
 
 import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
 import { NimbaSMSClient, NimbaSMSError } from "../_shared/nimba-client.ts";
@@ -15,6 +18,10 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Method not allowed" }, { status: 405 });
   }
 
+  const url = new URL(req.url);
+  const limit = parseIntOr(url.searchParams.get("limit"), 100);
+  const offset = parseIntOr(url.searchParams.get("offset"), 0);
+
   let client: NimbaSMSClient;
   try {
     client = NimbaSMSClient.fromEnv();
@@ -26,8 +33,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const balance = await client.getBalance();
-    return jsonResponse({ balance });
+    const senders = await client.getSenderNames({ limit, offset });
+    return jsonResponse(senders);
   } catch (err) {
     const e = err as NimbaSMSError;
     const status = e.status && e.status >= 400 ? e.status : 502;
@@ -37,3 +44,9 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+function parseIntOr(value: string | null, fallback: number): number {
+  if (value === null) return fallback;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}

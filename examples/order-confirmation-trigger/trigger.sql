@@ -32,8 +32,9 @@ declare
   payload          jsonb;
 begin
   payload := jsonb_build_object(
-    'to',      new.customer_phone,
-    'message', format(
+    'to',          jsonb_build_array(new.customer_phone),
+    'sender_name', 'MyShop',
+    'message',     format(
       'Thanks for your order! Total: %s XOF. Ref: %s',
       new.total_xof,
       substring(new.id::text, 1, 8)

@@ -9,7 +9,7 @@
 // users completing sign-up can call it.
 //
 // Body:
-//   { "phone": "+224620000000", "code": "123456" }
+//   { "phone": "224620000000", "code": "123456" }
 //
 // Companion table (see examples/phone-otp-auth/README.md):
 //

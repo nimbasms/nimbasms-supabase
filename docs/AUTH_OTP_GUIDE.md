@@ -1,21 +1,105 @@
 # Phone OTP Authentication Guide
 
-This guide describes the recommended pattern for building **phone OTP sign-in**
-on Supabase using Nimba SMS as the delivery channel. It walks through the
-data model, the two Edge Functions involved, and the security considerations
-that matter at scale.
+This guide covers **two ways** to build phone OTP sign-in on Supabase with
+Nimba SMS:
 
-A runnable example lives in [`examples/phone-otp-auth`](../examples/phone-otp-auth).
+1. **Managed flow** — Nimba generates, stores, and verifies the code.
+   Use the `send-otp` and `confirm-otp` Edge Functions.
+2. **Custom flow** — your app generates the code, hashes it, stores it in
+   Postgres, and verifies via the `verify-otp` Edge Function. Built on top of
+   `send-sms`. A runnable example lives in [`examples/phone-otp-auth`](../examples/phone-otp-auth).
+
+## Which one should I pick?
+
+| Concern                          | Managed (`send-otp`/`confirm-otp`) | Custom (`send-sms`/`verify-otp`) |
+| -------------------------------- | ---------------------------------- | -------------------------------- |
+| Code generation & storage        | Nimba (server-side)                | Your app (hashed in Postgres)    |
+| Rate limiting & attempt caps     | Nimba (built-in)                   | You (Postgres policy)            |
+| Audit trail in `sms_logs`        | ❌ No (verifications are separate) | ✅ Yes (every send is logged)    |
+| Localizable SMS body             | ✅ Yes (template with `<1234>`)    | ✅ Yes (full control)            |
+| Channel options                  | ✅ SMS / WhatsApp / Email          | SMS only                         |
+| Works with Supabase Auth hooks   | ✅ Yes (via `confirm-otp` result)  | ✅ Yes                           |
+| Lock-in / portability            | Tied to Nimba's `/verifications`   | Logic lives in your codebase     |
+
+**Rule of thumb** — pick the **managed flow** for green-field projects; pick
+the **custom flow** when you need a tight audit trail, custom rate limits, or
+you already store phone-bound state.
 
 ---
 
-## Why a custom flow?
+## A. Managed flow (recommended)
 
-Supabase Auth ships with native phone OTP (Twilio, MessageBird, Vonage,
-TextLocal). Nimba SMS is not in the built-in list, so we replicate the same
-contract ourselves on top of the `send-sms` Edge Function.
+```
+┌──────────┐  1. POST send-otp { to: "224..." }   ┌──────────────┐
+│ Browser  │ ──────────────────────────────────▶ │ Edge Function │
+│          │                                     │   send-otp    │
+│          │                                     └──────┬───────┘
+│          │                                            │ POST /v1/verifications
+│          │                                            ▼
+│          │                                       Nimba SMS API
+│          │                                            │
+│          │   2. ← { verification_id: "uuid" }         │
+│          │                                            │
+│          │   3. ← (user receives SMS)                 │
+│          │                                            │
+│          │  4. POST confirm-otp { verification_id, code: 123456 }
+│          │ ──────────────────────────────────▶ Edge Function
+│          │                                       confirm-otp
+│          │                                            │ PATCH /v1/verifications/{id}
+│          │                                            ▼
+│          │                                       Nimba SMS API
+│          │                                            │
+│          │   5. ← { approved: true, status: "approved" }
+└──────────┘
+```
 
-The flow:
+Client-side sketch (vanilla JS + supabase-js):
+
+```ts
+import { createClient } from "@supabase/supabase-js";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Step 1 — request OTP delivery
+const { data: send } = await supabase.functions.invoke("send-otp", {
+  body: {
+    to: "224620000000",
+    message: "Code Nimba: <1234>",   // optional, must contain <1234>
+    code_length: 6,
+    expiry_time: 5,
+  },
+});
+const verificationId = send.verification_id;
+// Persist `verificationId` in component state (or sessionStorage).
+
+// Step 2 — submit the code the user typed
+const { data: check } = await supabase.functions.invoke("confirm-otp", {
+  body: { verification_id: verificationId, code: 123456 },
+});
+if (check.approved) {
+  // → mint a Supabase session for this phone (see "Hooking into Supabase Auth")
+}
+```
+
+Nimba's enum (`check.status`) tells you *why* a verification didn't pass:
+
+| `status`            | Meaning |
+| ------------------- | ------- |
+| `pending`           | Queued for delivery |
+| `sent`              | Carrier accepted the SMS |
+| `received`          | Wrong code submitted (still has attempts) |
+| `expired`           | TTL elapsed before approval |
+| `too_many_attemps`  | Attempt cap reached |
+| `failure`           | Send failed (no balance, invalid sender, etc.) |
+| `approved`          | ✅ Code correct — proceed to sign-in |
+| `read`              | Verification read (WhatsApp channel only) |
+
+---
+
+## B. Custom flow
+
+Use this pattern when you need a Postgres-side audit trail or custom
+rate-limiting that goes beyond what Nimba's managed verifications expose.
+It builds on the `send-sms` Edge Function plus the `verify-otp` companion.
 
 ```
 ┌──────────┐  1. Enter phone           ┌─────────┐
@@ -129,7 +213,10 @@ Tip: include a space every 3 digits — easier to type from memory.
 
 | Symptom                                                      | Likely cause |
 | ------------------------------------------------------------ | ------------ |
-| `"sender_name is required"` from `send-sms`                  | `NIMBA_DEFAULT_SENDER` not set, or the dashboard hasn't approved it yet |
+| `"sender_name is required"` from `send-sms` / `send-otp`     | `NIMBA_DEFAULT_SENDER` not set, or the dashboard hasn't approved it yet |
 | SMS shows as `sent` but never `delivered`                    | Webhook URL not configured in Nimba, or `NIMBA_WEBHOOK_SECRET` mismatch |
+| `send-otp` 400 with "Le motif n'est pas présent dans le message" | Custom `message` is missing the `<1234>` placeholder Nimba uses to inject the code |
+| `confirm-otp` returns `status: "too_many_attemps"`           | Caller exceeded the `attempts` cap (3–10) configured at send time — restart the flow |
+| `confirm-otp` returns `status: "expired"`                    | More than `expiry_time` minutes elapsed since `send-otp` — restart the flow |
 | 401 from `verify-otp` on first try                           | Browser-side phone formatting differs from the inserted row — both sides must use the same `formatGuineanNumber()` |
 | `"No active code for this phone"`                            | Row was already consumed, expired, or `phone` value drifted |

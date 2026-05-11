@@ -60,8 +60,8 @@ Make sure the following secrets are set on the Supabase project:
 
 ```bash
 supabase secrets set \
-  NIMBA_SERVICE_ID=xxx \
-  NIMBA_SECRET_TOKEN=xxx \
+  NIMBA_ACCOUNT_SID=xxx \
+  NIMBA_AUTH_TOKEN=xxx \
   NIMBA_DEFAULT_SENDER=YourBrand
 ```
 
