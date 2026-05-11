@@ -5,8 +5,8 @@ Get your first SMS out through Nimba SMS in under 5 minutes.
 ## 1. Prerequisites
 
 - A Supabase project (cloud or self-hosted) and the [Supabase CLI](https://supabase.com/docs/guides/cli) v1.200+
-- A Nimba SMS account ([app.nimbasms.com](https://app.nimbasms.com)) with
-  - an `ACCOUNT_SID` and `AUTH_TOKEN` (Settings → API — they are labelled
+- A Nimba SMS account ([www.nimbasms.com](https://www.nimbasms.com)) with
+  - an `ACCOUNT_SID` and `AUTH_TOKEN` (Settings → Developeurs — they are labelled
     **SERVICE_ID** and **SECRET_TOKEN** in the dashboard but the SDK calls
     them ACCOUNT_SID/AUTH_TOKEN)
   - at least one approved Sender ID
