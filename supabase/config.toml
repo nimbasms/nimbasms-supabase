@@ -1,0 +1,57 @@
+# For reference: https://supabase.com/docs/guides/local-development/cli/config
+project_id = "nimbasms-supabase"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["https://127.0.0.1:3000"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.sms]
+enable_signup = false
+enable_confirmations = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Edge Functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+[functions.send-sms]
+verify_jwt = true
+
+[functions.send-campaign]
+verify_jwt = true
+
+[functions.check-balance]
+verify_jwt = true
+
+[functions.verify-otp]
+# Public — anyone with the OTP code can verify
+verify_jwt = false
+
+[functions.sms-webhook]
+# Public — Nimba SMS posts delivery reports here; auth is done via shared secret
+verify_jwt = false
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[analytics]
+enabled = false

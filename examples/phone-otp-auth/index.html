@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Phone OTP — Nimba SMS × Supabase</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        max-width: 28rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+      }
+      h1 { font-size: 1.25rem; margin-bottom: 1.5rem; }
+      label { display: block; margin: 1rem 0 0.25rem; font-size: 0.875rem; }
+      input, button {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        font-size: 1rem;
+        border-radius: 0.4rem;
+        border: 1px solid #999;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 1rem;
+        background: #111;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .msg { margin-top: 1rem; font-size: 0.875rem; min-height: 1.25rem; }
+      .ok  { color: #0a7d2c; }
+      .err { color: #c62828; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Sign in with your phone</h1>
+
+    <section id="step-phone">
+      <label for="phone">Phone number</label>
+      <input id="phone" type="tel" placeholder="+224 620 00 00 00" autocomplete="tel" />
+      <button id="btn-send">Send code</button>
+      <div id="msg-phone" class="msg"></div>
+    </section>
+
+    <section id="step-code" class="hidden">
+      <label for="code">6-digit code</label>
+      <input id="code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+      <button id="btn-verify">Verify</button>
+      <div id="msg-code" class="msg"></div>
+    </section>
+
+    <script type="module">
+      import { createClient } from "https://esm.sh/@supabase/supabase-js@2.46.1";
+
+      // ── Configure ────────────────────────────────────────────────────────
+      const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+      const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+      const OTP_TTL_SECONDS = 5 * 60;
+
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      // ── DOM ──────────────────────────────────────────────────────────────
+      const $ = (id) => document.getElementById(id);
+      const stepPhone = $("step-phone");
+      const stepCode  = $("step-code");
+      const phoneInput = $("phone");
+      const codeInput  = $("code");
+      const btnSend   = $("btn-send");
+      const btnVerify = $("btn-verify");
+      const msgPhone  = $("msg-phone");
+      const msgCode   = $("msg-code");
+
+      let currentPhone = "";
+
+      // ── Helpers ──────────────────────────────────────────────────────────
+      function formatGuineanNumber(raw) {
+        const trimmed = String(raw).trim();
+        if (!trimmed) return "";
+        const hasPlus = trimmed.startsWith("+");
+        const digits = trimmed.replace(/[^\d]/g, "");
+        if (!digits) return "";
+        if (hasPlus) return `+${digits}`;
+        if (digits.startsWith("224") && digits.length >= 11) return `+${digits}`;
+        if (digits.length === 8 || digits.length === 9) return `+224${digits}`;
+        return `+${digits}`;
+      }
+
+      async function sha256Hex(input) {
+        const buf = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(input),
+        );
+        return [...new Uint8Array(buf)]
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      }
+
+      function generateCode() {
+        // 6-digit numeric code, zero-padded.
+        const buf = new Uint32Array(1);
+        crypto.getRandomValues(buf);
+        return String(buf[0] % 1_000_000).padStart(6, "0");
+      }
+
+      function status(el, msg, kind) {
+        el.textContent = msg;
+        el.className = `msg ${kind ?? ""}`;
+      }
+
+      // ── Step 1: send code ────────────────────────────────────────────────
+      btnSend.addEventListener("click", async () => {
+        const phone = formatGuineanNumber(phoneInput.value);
+        if (!phone) {
+          status(msgPhone, "Please enter a valid phone number.", "err");
+          return;
+        }
+        btnSend.disabled = true;
+        status(msgPhone, "Sending code…");
+        try {
+          const code = generateCode();
+          const codeHash = await sha256Hex(`${phone}:${code}`);
+          const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000)
+            .toISOString();
+
+          const { error: insertError } = await supabase
+            .from("otp_codes")
+            .insert({ phone, code_hash: codeHash, expires_at: expiresAt });
+          if (insertError) throw insertError;
+
+          const { error: sendError } = await supabase.functions.invoke("send-sms", {
+            body: { to: phone, message: `Your verification code: ${code}` },
+          });
+          if (sendError) throw sendError;
+
+          currentPhone = phone;
+          stepPhone.classList.add("hidden");
+          stepCode.classList.remove("hidden");
+          status(msgCode, `Code sent to ${phone}.`, "ok");
+          codeInput.focus();
+        } catch (err) {
+          console.error(err);
+          status(msgPhone, err.message ?? "Failed to send code.", "err");
+          btnSend.disabled = false;
+        }
+      });
+
+      // ── Step 2: verify ───────────────────────────────────────────────────
+      btnVerify.addEventListener("click", async () => {
+        const code = codeInput.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          status(msgCode, "Enter the 6-digit code.", "err");
+          return;
+        }
+        btnVerify.disabled = true;
+        status(msgCode, "Verifying…");
+        try {
+          const { data, error } = await supabase.functions.invoke("verify-otp", {
+            body: { phone: currentPhone, code },
+          });
+          if (error) throw error;
+          status(msgCode, `Verified! (${data.phone})`, "ok");
+          // → at this point, complete sign-in / link the phone to a user.
+        } catch (err) {
+          console.error(err);
+          status(msgCode, err.message ?? "Invalid or expired code.", "err");
+          btnVerify.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

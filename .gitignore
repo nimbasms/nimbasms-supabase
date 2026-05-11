@@ -141,3 +141,21 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Deno
+deno.lock
+.deno/
+
+# Supabase CLI
+.supabase/
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+supabase/functions/*/.env
+
+# IDE / OS
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
